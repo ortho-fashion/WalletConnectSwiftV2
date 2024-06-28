@@ -9,11 +9,7 @@ final class SessionProposalPresenter: ObservableObject {
 
     let importAccount: ImportAccount
     let sessionProposal: Session.Proposal
-    let validationStatus: VerifyContext.ValidationStatus?
-    
-    @Published var showError = false
-    @Published var errorMessage = "Error"
-    @Published var showConnectedSheet = false
+    let verified: Bool?
     
     private var disposeBag = Set<AnyCancellable>()
 
@@ -29,42 +25,18 @@ final class SessionProposalPresenter: ObservableObject {
         self.router = router
         self.sessionProposal = proposal
         self.importAccount = importAccount
-        self.validationStatus = context?.validation
+        self.verified = (context?.validation == .valid) ? true : (context?.validation == .unknown ? nil : false)
     }
     
     @MainActor
     func onApprove() async throws {
-        do {
-            ActivityIndicatorManager.shared.start()
-            let showConnected = try await interactor.approve(proposal: sessionProposal, account: importAccount.account)
-            showConnected ? showConnectedSheet.toggle() : router.dismiss()
-            ActivityIndicatorManager.shared.stop()
-        } catch {
-            ActivityIndicatorManager.shared.stop()
-            errorMessage = error.localizedDescription
-            showError.toggle()
-        }
+        try await interactor.approve(proposal: sessionProposal, account: importAccount.account)
+        router.dismiss()
     }
 
     @MainActor
     func onReject() async throws {
-        do {
-            ActivityIndicatorManager.shared.start()
-            try await interactor.reject(proposal: sessionProposal)
-            ActivityIndicatorManager.shared.stop()
-            router.dismiss()
-        } catch {
-            ActivityIndicatorManager.shared.stop()
-            errorMessage = error.localizedDescription
-            showError.toggle()
-        }
-    }
-    
-    func onConnectedSheetDismiss() {
-        router.dismiss()
-    }
-
-    func dismiss() {
+        try await interactor.reject(proposal: sessionProposal)
         router.dismiss()
     }
 }
@@ -72,22 +44,7 @@ final class SessionProposalPresenter: ObservableObject {
 // MARK: - Private functions
 private extension SessionProposalPresenter {
     func setupInitialState() {
-        Web3Wallet.instance.sessionProposalExpirationPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] proposal in
-            guard let self = self else { return }
-            if proposal.id == self.sessionProposal.id {
-                dismiss()
-            }
-        }.store(in: &disposeBag)
 
-        Web3Wallet.instance.pairingExpirationPublisher
-            .receive(on: DispatchQueue.main)
-            .sink {[weak self]  pairing in
-                if self?.sessionProposal.pairingTopic == pairing.topic {
-                    self?.dismiss()
-                }
-        }.store(in: &disposeBag)
     }
 }
 

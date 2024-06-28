@@ -1,8 +1,8 @@
 import Foundation
 
 public class VerifyClientFactory {
-    public static func create() -> VerifyClient {
-        let originVerifier = OriginVerifier()
+    public static func create(verifyHost: String = "verify.walletconnect.com") -> VerifyClient {
+        let originVerifier = OriginVerifier(verifyHost: verifyHost)
         let assertionRegistrer = AssertionRegistrer()
         let logger = ConsoleLogger(loggingLevel: .off)
         let keyValueStorage = UserDefaults.standard
@@ -18,6 +18,7 @@ public class VerifyClientFactory {
             keyAttestationService: keyAttestationService
         )
         return VerifyClient(
+            verifyHost: verifyHost,
             originVerifier: originVerifier,
             assertionRegistrer: assertionRegistrer,
             appAttestationRegistrer: appAttestationRegistrer

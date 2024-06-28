@@ -2,10 +2,13 @@ import Foundation
 import Combine
 
 import Web3Wallet
-import WalletConnectNotify
+import WalletConnectPush
 
 final class MainInteractor {
-
+    var pushRequestPublisher: AnyPublisher<(id: RPCID, account: Account, metadata: AppMetadata), Never> {
+        return Push.wallet.requestPublisher
+    }
+    
     var sessionProposalPublisher: AnyPublisher<(proposal: Session.Proposal, context: VerifyContext?), Never> {
         return Web3Wallet.instance.sessionProposalPublisher
     }
@@ -14,7 +17,7 @@ final class MainInteractor {
         return Web3Wallet.instance.sessionRequestPublisher
     }
     
-    var authenticateRequestPublisher: AnyPublisher<(request: AuthenticationRequest, context: VerifyContext?), Never> {
-        return Web3Wallet.instance.authenticateRequestPublisher
+    var requestPublisher: AnyPublisher<(request: AuthRequest, context: VerifyContext?), Never> {
+        return Web3Wallet.instance.authRequestPublisher
     }
 }

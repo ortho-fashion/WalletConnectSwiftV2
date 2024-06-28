@@ -7,7 +7,7 @@ enum Destination: Equatable {
     case welcome
     case viewAll
     case qr
-    case walletDetail(Wallet)
+    case walletDetail(Listing)
     case getWallet
         
     var contentTitle: String {
@@ -38,28 +38,25 @@ final class ModalViewModel: ObservableObject {
     var isShown: Binding<Bool>
     let interactor: ModalSheetInteractor
     let uiApplicationWrapper: UIApplicationWrapper
-    let recentWalletStorage: RecentWalletsStorage
     
     @Published private(set) var destinationStack: [Destination] = [.welcome]
     @Published private(set) var uri: String?
-    @Published private(set) var wallets: [Wallet] = []
-        
+    @Published private(set) var wallets: [Listing] = []
+    
     @Published var searchTerm: String = ""
     
     @Published var toast: Toast?
-    
-    @Published private(set) var isThereMoreWallets: Bool = true
-    private var maxPage = Int.max
-    private var currentPage: Int = 0
     
     var destination: Destination {
         destinationStack.last!
     }
     
-    var filteredWallets: [Wallet] {
-        wallets
-            .sortByRecent()
-            .filter(searchTerm: searchTerm)
+    var filteredWallets: [Listing] {
+        if searchTerm.isEmpty { return sortByRecent(wallets) }
+        
+        return sortByRecent(
+            wallets.filter { $0.name.lowercased().contains(searchTerm.lowercased()) }
+        )
     }
     
     private var disposeBag = Set<AnyCancellable>()
@@ -68,13 +65,11 @@ final class ModalViewModel: ObservableObject {
     init(
         isShown: Binding<Bool>,
         interactor: ModalSheetInteractor,
-        uiApplicationWrapper: UIApplicationWrapper = .live,
-        recentWalletStorage: RecentWalletsStorage = RecentWalletsStorage()
+        uiApplicationWrapper: UIApplicationWrapper = .live
     ) {
         self.isShown = isShown
         self.interactor = interactor
         self.uiApplicationWrapper = uiApplicationWrapper
-        self.recentWalletStorage = recentWalletStorage
             
         interactor.sessionSettlePublisher
             .receive(on: DispatchQueue.main)
@@ -87,7 +82,7 @@ final class ModalViewModel: ObservableObject {
         
         interactor.sessionRejectionPublisher
             .receive(on: DispatchQueue.main)
-            .sink { _, reason in
+            .sink { (proposal, reason) in
                 
                 print(reason)
                 self.toast = Toast(style: .error, message: reason.message)
@@ -123,16 +118,13 @@ final class ModalViewModel: ObservableObject {
         uiApplicationWrapper.openURL(url, nil)
     }
     
-    func onWalletTap(_ wallet: Wallet) {
-        setLastTimeUsed(wallet.id)
+    func onListingTap(_ listing: Listing) {
+        setLastTimeUsed(listing.id)
     }
     
     func onBackButton() {
         guard destinationStack.count != 1 else { return }
-        
-        withAnimation {
-            _ = destinationStack.popLast()
-        }
+        _ = destinationStack.popLast()
         
         if destinationStack.last?.hasSearch == false {
             searchTerm = ""
@@ -140,6 +132,7 @@ final class ModalViewModel: ObservableObject {
     }
         
     func onCopyButton() {
+        
         guard let uri else {
             toast = Toast(style: .error, message: "No uri found")
             return
@@ -166,63 +159,38 @@ final class ModalViewModel: ObservableObject {
     
     @MainActor
     func fetchWallets() async {
-        let entries = 40
-        
         do {
-            guard currentPage <= maxPage else {
-                return
-            }
-            
-            currentPage += 1
-            
-            if currentPage == maxPage {
-                isThereMoreWallets = false
-            }
-        
-            let (total, wallets) = try await interactor.getWallets(page: currentPage, entries: entries)
-            maxPage = Int(Double(total / entries).rounded(.up))
-
+            let wallets = try await interactor.getListings()
             // Small deliberate delay to ensure animations execute properly
             try await Task.sleep(nanoseconds: 500_000_000)
-            
-            loadRecentWallets()
-            checkWhetherInstalled(wallets: wallets)
-            
-            self.wallets.append(contentsOf: wallets
-                .sortByOrder()
-                .sortByInstalled()
-            )
+                
+            withAnimation {
+                self.wallets = wallets.sorted {
+                    guard let lhs = $0.order else {
+                        return false
+                    }
+                        
+                    guard let rhs = $1.order else {
+                        return true
+                    }
+                    
+                    return lhs < rhs
+                }
+                
+                loadRecentWallets()
+            }
         } catch {
             toast = Toast(style: .error, message: error.localizedDescription)
         }
     }
 }
 
-// MARK: - Sorting and filtering
+// MARK: - Recent Wallets
 
-private extension Array where Element: Wallet {
-    func sortByOrder() -> [Wallet] {
-        sorted {
-            $0.order < $1.order
-        }
-    }
+private extension ModalViewModel {
     
-    func sortByInstalled() -> [Wallet] {
-        sorted { lhs, rhs in
-            if lhs.isInstalled, !rhs.isInstalled {
-                return true
-            }
-            
-            if !lhs.isInstalled, rhs.isInstalled {
-                return false
-            }
-            
-            return false
-        }
-    }
-    
-    func sortByRecent() -> [Wallet] {
-        sorted { lhs, rhs in
+    func sortByRecent(_ input: [Listing]) -> [Listing] {
+        input.sorted { lhs, rhs in
             guard let lhsLastTimeUsed = lhs.lastTimeUsed else {
                 return false
             }
@@ -235,77 +203,81 @@ private extension Array where Element: Wallet {
         }
     }
     
-    func filter(searchTerm: String) -> [Wallet] {
-        if searchTerm.isEmpty { return self }
-        
-        return filter {
-            $0.name.lowercased().contains(searchTerm.lowercased())
-        }
-    }
-}
-
-// MARK: - Recent & Installed Wallets
-
-private extension ModalViewModel {
-    func checkWhetherInstalled(wallets: [Wallet]) {
-        guard let schemes = Bundle.main.object(forInfoDictionaryKey: "LSApplicationQueriesSchemes") as? [String] else {
-            return
-        }
-        
-        wallets.forEach {
-            if
-                let walletScheme = $0.mobileLink,
-                !walletScheme.isEmpty,
-                schemes.contains(walletScheme.replacingOccurrences(of: "://", with: ""))
-            {
-                $0.isInstalled = uiApplicationWrapper.canOpenURL(URL(string: walletScheme)!)
-            }
-        }
-    }
-    
     func loadRecentWallets() {
-        recentWalletStorage.recentWallets.forEach { wallet in
-            guard let lastTimeUsed = wallet.lastTimeUsed else { return }
+        RecentWalletsStorage().recentWallets.forEach { wallet in
+            
+            guard let lastTimeUsed = wallet.lastTimeUsed else {
+                return
+            }
+            
+            // Consider Recent only for 3 days
+            if abs(lastTimeUsed.timeIntervalSinceNow) > (24 * 60 * 60 * 3) {
+                return
+            }
+            
             setLastTimeUsed(wallet.id, date: lastTimeUsed)
         }
     }
     
-    func setLastTimeUsed(_ id: String, date: Date = Date()) {
-        wallets.first {
-            $0.id == id
-        }?.lastTimeUsed = date
-        recentWalletStorage.recentWallets = wallets
+    func saveRecentWallets() {
+        RecentWalletsStorage().recentWallets = Array(wallets.filter {
+            $0.lastTimeUsed != nil
+        }.prefix(5))
+    }
+    
+    func setLastTimeUsed(_ walletId: String, date: Date = Date()) {
+        guard let index = wallets.firstIndex(where: {
+            $0.id == walletId
+        }) else {
+            return
+        }
+        
+        var copy = wallets[index]
+        copy.lastTimeUsed = date
+        wallets[index] = copy
+        
+        saveRecentWallets()
     }
 }
 
 // MARK: - Deeplinking
 
 protocol WalletDeeplinkHandler {
-    func openAppstore(wallet: Wallet)
-    func navigateToDeepLink(wallet: Wallet, preferBrowser: Bool)
+    func openAppstore(wallet: Listing)
+    func navigateToDeepLink(wallet: Listing, preferUniversal: Bool, preferBrowser: Bool)
 }
 
 extension ModalViewModel: WalletDeeplinkHandler {
-    func openAppstore(wallet: Wallet) {
+ 
+    func openAppstore(wallet: Listing) {
         guard
-            let storeLinkString = wallet.appStore,
+            let storeLinkString = wallet.app.ios,
             let storeLink = URL(string: storeLinkString)
         else { return }
         
         uiApplicationWrapper.openURL(storeLink, nil)
     }
     
-    func navigateToDeepLink(wallet: Wallet, preferBrowser: Bool) {
+    func navigateToDeepLink(wallet: Listing, preferUniversal: Bool, preferBrowser: Bool) {
         do {
-            let nativeScheme = preferBrowser ? wallet.webappLink : wallet.mobileLink
-            let nativeUrlString = try formatNativeUrlString(nativeScheme)
+            let nativeScheme = preferBrowser ? nil : wallet.mobile.native
+            let universalScheme = preferBrowser ? wallet.desktop.universal : wallet.mobile.universal
             
-            if let nativeUrl = nativeUrlString?.toURL() {
+            let nativeUrlString = try formatNativeUrlString(nativeScheme)
+            let universalUrlString = try formatUniversalUrlString(universalScheme)
+            
+            if let nativeUrl = nativeUrlString?.toURL(), !preferUniversal {
                 uiApplicationWrapper.openURL(nativeUrl) { success in
                     if !success {
                         self.toast = Toast(style: .error, message: DeeplinkErrors.failedToOpen.localizedDescription)
                     }
                 }
+            } else if let universalUrl = universalUrlString?.toURL() {
+                uiApplicationWrapper.openURL(universalUrl) { success in
+                    if !success {
+                        self.toast = Toast(style: .error, message: DeeplinkErrors.failedToOpen.localizedDescription)
+                    }
+               }
             } else {
                 throw DeeplinkErrors.noWalletLinkFound
             }

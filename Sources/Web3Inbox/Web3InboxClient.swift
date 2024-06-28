@@ -1,30 +1,23 @@
 import Foundation
 import WebKit
-import Combine
 
 public final class Web3InboxClient {
 
     private let webView: WKWebView
     private var account: Account
     private let logger: ConsoleLogging
-    private let notifyClient: NotifyClient
+    private let pushClient: WalletPushClient
 
     private let chatClientProxy: ChatClientProxy
     private let chatClientSubscriber: ChatClientRequestSubscriber
 
-    private let notifyClientProxy: NotifyClientProxy
-    private let notifyClientSubscriber: NotifyClientRequestSubscriber
+    private let pushClientProxy: PushClientProxy
+    private let pushClientSubscriber: PushClientRequestSubscriber
 
     private let chatWebviewProxy: WebViewProxy
-    private let notifyWebviewProxy: WebViewProxy
+    private let pushWebviewProxy: WebViewProxy
 
     private let webviewSubscriber: WebViewRequestSubscriber
-
-    public var logsPublisher: AnyPublisher<Log, Never> {
-        logger.logsPublisher
-            .merge(with: notifyClient.logsPublisher)
-            .eraseToAnyPublisher()
-    }
 
     init(
         webView: WKWebView,
@@ -33,11 +26,11 @@ public final class Web3InboxClient {
         chatClientProxy: ChatClientProxy,
         clientSubscriber: ChatClientRequestSubscriber,
         chatWebviewProxy: WebViewProxy,
-        notifyWebviewProxy: WebViewProxy,
+        pushWebviewProxy: WebViewProxy,
         webviewSubscriber: WebViewRequestSubscriber,
-        notifyClientProxy: NotifyClientProxy,
-        notifyClientSubscriber: NotifyClientRequestSubscriber,
-        notifyClient: NotifyClient
+        pushClientProxy: PushClientProxy,
+        pushClientSubscriber: PushClientRequestSubscriber,
+        pushClient: WalletPushClient
     ) {
         self.webView = webView
         self.account = account
@@ -45,18 +38,12 @@ public final class Web3InboxClient {
         self.chatClientProxy = chatClientProxy
         self.chatClientSubscriber = clientSubscriber
         self.chatWebviewProxy = chatWebviewProxy
-        self.notifyWebviewProxy = notifyWebviewProxy
+        self.pushWebviewProxy = pushWebviewProxy
         self.webviewSubscriber = webviewSubscriber
-        self.notifyClientProxy = notifyClientProxy
-        self.notifyClientSubscriber = notifyClientSubscriber
-        self.notifyClient = notifyClient
+        self.pushClientProxy = pushClientProxy
+        self.pushClientSubscriber = pushClientSubscriber
+        self.pushClient = pushClient
         setupSubscriptions()
-    }
-
-
-    public func setLogging(level: LoggingLevel) {
-        logger.setLogging(level: level)
-        notifyClient.setLogging(level: .debug)
     }
 
     public func getWebView() -> WKWebView {
@@ -72,11 +59,7 @@ public final class Web3InboxClient {
     }
 
     public func register(deviceToken: Data) async throws {
-        try await notifyClient.register(deviceToken: deviceToken)
-    }
-
-    public func reload() {
-        webviewSubscriber.reload(webView)
+        try await pushClient.register(deviceToken: deviceToken)
     }
 }
 
@@ -88,8 +71,8 @@ private extension Web3InboxClient {
 
         // Chat
         
-        chatClientProxy.onResponse = { [unowned self] response, request in
-            try await self.chatWebviewProxy.respond(response, request)
+        chatClientProxy.onResponse = { [unowned self] response in
+            try await self.chatWebviewProxy.respond(response)
         }
 
         chatClientSubscriber.onRequest = { [unowned self] request in
@@ -101,19 +84,19 @@ private extension Web3InboxClient {
             try await self.chatClientProxy.request(request)
         }
 
-        // Notify
+        // Push
 
-        notifyClientProxy.onResponse = { [unowned self] response, request in
-            try await self.notifyWebviewProxy.respond(response, request)
+        pushClientProxy.onResponse = { [unowned self] response in
+            try await self.pushWebviewProxy.respond(response)
         }
 
-        notifyClientSubscriber.onRequest = { [unowned self] request in
-            try await self.notifyWebviewProxy.request(request)
+        pushClientSubscriber.onRequest = { [unowned self] request in
+            try await self.pushWebviewProxy.request(request)
         }
 
-        webviewSubscriber.onNotifyRequest = { [unowned self] request in
-            logger.debug("w3i: notify method \(request.method) requested")
-            try await self.notifyClientProxy.request(request)
+        webviewSubscriber.onPushRequest = { [unowned self] request in
+            logger.debug("w3i: push method \(request.method) requested")
+            try await self.pushClientProxy.request(request)
         }
     }
 

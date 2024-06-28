@@ -7,7 +7,7 @@ actor IdentityService {
     private let storage: IdentityStorage
     private let networkService: IdentityNetworking
     private let iatProvader: IATProvider
-    private let messageFormatter: SIWEFromCacaoFormatting
+    private let messageFormatter: SIWECacaoFormatting
 
     init(
         keyserverURL: URL,
@@ -15,7 +15,7 @@ actor IdentityService {
         storage: IdentityStorage,
         networkService: IdentityNetworking,
         iatProvader: IATProvider,
-        messageFormatter: SIWEFromCacaoFormatting
+        messageFormatter: SIWECacaoFormatting
     ) {
         self.keyserverURL = keyserverURL
         self.kms = kms
@@ -25,64 +25,19 @@ actor IdentityService {
         self.messageFormatter = messageFormatter
     }
 
-    func prepareRegistration(account: Account,
-        domain: String,
-        statement: String? = nil,
-        resources: [String]) throws -> IdentityRegistrationParams {
-
-        let identityKey = SigningPrivateKey()
-
-        let uri = buildUri(domain: domain, didKey: identityKey.publicKey.did)
-
-        let recapUrns = resources.compactMap { try? RecapUrn(urn: $0)}
-
-        let mergedRecap = try? RecapUrnMergingService.merge(recapUrns: recapUrns)
-        var payloadStatement: String?
-        if let mergedRecapUrn = mergedRecap {
-            // If there's a merged recap, generate its statement
-            payloadStatement = try SiweStatementBuilder.buildSiweStatement(statement: statement, mergedRecapUrn: mergedRecapUrn)
-        } else {
-            // If no merged recap, use the original statement
-            payloadStatement = statement
-        }
-
-        let payload = CacaoPayload(
-            iss: account.did,
-            domain: domain,
-            aud: uri,
-            version: getVersion(),
-            nonce: getNonce(),
-            iat: iatProvader.iat,
-            nbf: nil, exp: nil,
-            statement: payloadStatement,
-            requestId: nil,
-            resources: resources
-        )
-
-        let message = try messageFormatter.formatMessage(from: payload)
-
-        return IdentityRegistrationParams(message: message, payload: payload, privateIdentityKey: identityKey)
-    }
-
-    func buildUri(domain: String, didKey: String) -> String {
-        return "bundleid://\(domain)?walletconnect_identity_key=\(didKey)"
-    }
-
-    // TODO: Verifications
-    func registerIdentity(params: IdentityRegistrationParams, signature: CacaoSignature) async throws -> String {
-        let account = try params.account
+    func registerIdentity(account: Account,
+        onSign: SigningCallback
+    ) async throws -> String {
 
         if let identityKey = try? storage.getIdentityKey(for: account) {
             return identityKey.publicKey.hexRepresentation
         }
 
-        let cacaoHeader = CacaoHeader(t: "eip4361")
-        let cacao = Cacao(h: cacaoHeader, p: params.payload, s: signature)
-
+        let identityKey = SigningPrivateKey()
+        let cacao = try await makeCacao(DIDKey: identityKey.publicKey.did, account: account, onSign: onSign)
         try await networkService.registerIdentity(cacao: cacao)
-        try storage.saveIdentityKey(params.privateIdentityKey, for: account)
 
-        return params.privateIdentityKey.publicKey.hexRepresentation
+        return try storage.saveIdentityKey(identityKey, for: account).publicKey.hexRepresentation
     }
 
     func registerInvite(account: Account) async throws -> AgreementPublicKey {
@@ -93,16 +48,16 @@ actor IdentityService {
 
         let inviteKey = try kms.createX25519KeyPair()
         let invitePublicKey = DIDKey(rawData: inviteKey.rawRepresentation)
-        let idAuth = try makeIDAuth(account: account, issuer: invitePublicKey, claims: RegisterInviteClaims.self)
+        let idAuth = try makeIDAuth(account: account, issuer: invitePublicKey, kind: .registerInvite)
         try await networkService.registerInvite(idAuth: idAuth)
 
         return try storage.saveInviteKey(inviteKey, for: account)
     }
 
-    func unregister(account: Account) async throws {
+    func unregister(account: Account, onSign: SigningCallback) async throws {
         let identityKey = try storage.getIdentityKey(for: account)
         let identityPublicKey = DIDKey(rawData: identityKey.publicKey.rawRepresentation)
-        let idAuth = try makeIDAuth(account: account, issuer: identityPublicKey, claims: UnregisterIdentityClaims.self)
+        let idAuth = try makeIDAuth(account: account, issuer: identityPublicKey, kind: .unregisterIdentity)
         try await networkService.removeIdentity(idAuth: idAuth)
         try storage.removeIdentityKey(for: account)
     }
@@ -110,7 +65,7 @@ actor IdentityService {
     func goPrivate(account: Account) async throws -> AgreementPublicKey {
         let inviteKey = try storage.getInviteKey(for: account)
         let invitePublicKey = DIDKey(rawData: inviteKey.rawRepresentation)
-        let idAuth = try makeIDAuth(account: account, issuer: invitePublicKey, claims: UnregisterInviteClaims.self)
+        let idAuth = try makeIDAuth(account: account, issuer: invitePublicKey, kind: .unregisterInvite)
         try await networkService.removeInvite(idAuth: idAuth)
         try storage.removeInviteKey(for: account)
 
@@ -130,10 +85,39 @@ actor IdentityService {
 
 private extension IdentityService {
 
-    func makeIDAuth<Claims: IDAuthClaims>(account: Account, issuer: DIDKey, claims: Claims.Type) throws -> String {
+    func makeCacao(
+        DIDKey: String,
+        account: Account,
+        onSign: SigningCallback
+    ) async throws -> Cacao {
+
+        let cacaoHeader = CacaoHeader(t: "eip4361")
+        let cacaoPayload = CacaoPayload(
+            iss: account.did,
+            domain: keyserverURL.host!,
+            aud: getAudience(),
+            version: getVersion(),
+            nonce: getNonce(),
+            iat: iatProvader.iat,
+            nbf: nil, exp: nil, statement: "statement", requestId: nil,
+            resources: [DIDKey]
+        )
+
+        let result = await onSign(try messageFormatter.formatMessage(from: cacaoPayload))
+
+        switch result {
+        case .signed(let cacaoSignature):
+            return Cacao(h: cacaoHeader, p: cacaoPayload, s: cacaoSignature)
+        case .rejected:
+            throw IdentityError.signatureRejected
+        }
+    }
+
+    func makeIDAuth(account: Account, issuer: DIDKey, kind: IDAuthPayload.Kind) throws -> String {
         let identityKey = try storage.getIdentityKey(for: account)
 
-        let payload = IDAuthPayload<Claims>(
+        let payload = IDAuthPayload(
+            kind: kind,
             keyserver: keyserverURL,
             account: account,
             invitePublicKey: issuer
@@ -148,5 +132,9 @@ private extension IdentityService {
 
     private func getVersion() -> String {
         return "1"
+    }
+
+    private func getAudience() -> String {
+        return keyserverURL.absoluteString
     }
 }

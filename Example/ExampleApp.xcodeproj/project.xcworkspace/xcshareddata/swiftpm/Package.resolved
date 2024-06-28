@@ -15,8 +15,8 @@
         "repositoryURL": "https://github.com/krzyzanowskim/CryptoSwift.git",
         "state": {
           "branch": null,
-          "revision": "7892a123f7e8d0fe62f9f03728b17bbd4f94df5c",
-          "version": "1.8.1"
+          "revision": "32f641cf24fc7abc1c591a2025e9f2f572648b0f",
+          "version": "1.7.2"
         }
       },
       {
@@ -25,15 +25,6 @@
         "state": {
           "branch": "develop",
           "revision": "748a85b1dfe9a2fa592bd9266c5a926e4e1d3f44",
-          "version": null
-        }
-      },
-      {
-        "package": "Mixpanel",
-        "repositoryURL": "https://github.com/mixpanel/mixpanel-swift",
-        "state": {
-          "branch": "master",
-          "revision": "9438b4a5f76bf2108b09f8fed1abbad8f353e1a2",
           "version": null
         }
       },
@@ -69,8 +60,8 @@
         "repositoryURL": "https://github.com/getsentry/sentry-cocoa.git",
         "state": {
           "branch": null,
-          "revision": "38f4f70d07117b9f958a76b1bff278c2f29ffe0e",
-          "version": "8.21.0"
+          "revision": "04bee4ad86d74d4cb4d7101ff826d6e355301ba9",
+          "version": "8.9.4"
         }
       },
       {
@@ -128,15 +119,6 @@
         }
       },
       {
-        "package": "SwiftMessages",
-        "repositoryURL": "https://github.com/SwiftKickMobile/SwiftMessages",
-        "state": {
-          "branch": null,
-          "revision": "62e12e138fc3eedf88c7553dd5d98712aa119f40",
-          "version": "9.0.9"
-        }
-      },
-      {
         "package": "swiftui-async-button",
         "repositoryURL": "https://github.com/lorenzofiamingo/swiftui-async-button",
         "state": {
@@ -164,30 +146,12 @@
         }
       },
       {
-        "package": "CoinbaseWalletSDK",
-        "repositoryURL": "https://github.com/WalletConnect/wallet-mobile-sdk",
-        "state": {
-          "branch": null,
-          "revision": "b6dfb7d6b8447c7c5b238a10443a1ac28223f38f",
-          "version": "1.0.0"
-        }
-      },
-      {
         "package": "Web3",
         "repositoryURL": "https://github.com/WalletConnect/Web3.swift",
         "state": {
           "branch": null,
           "revision": "569255adcfff0b37e4cb8004aea29d0e2d6266df",
           "version": "1.0.2"
-        }
-      },
-      {
-        "package": "swift-web3modal",
-        "repositoryURL": "https://github.com/WalletConnect/web3modal-swift",
-        "state": {
-          "branch": null,
-          "revision": "25abd7e5471f21d662400f9763948fbf97c60c97",
-          "version": null
         }
       }
     ]

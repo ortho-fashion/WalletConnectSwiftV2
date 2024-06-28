@@ -6,9 +6,6 @@ import WalletConnectKMS
 import WalletConnectNetworking
 
 public class NetworkingInteractorMock: NetworkInteracting {
-
-    private var publishers = Set<AnyCancellable>()
-
     private(set) var subscriptions: [String] = []
     private(set) var unsubscriptions: [String] = []
 
@@ -18,7 +15,6 @@ public class NetworkingInteractorMock: NetworkInteracting {
     private(set) var didRespondError = false
     private(set) var didCallSubscribe = false
     private(set) var didCallUnsubscribe = false
-    private(set) var didCallHandleHistoryRequest = false
     private(set) var didRespondOnTopic: String?
     private(set) var lastErrorCode = -1
 
@@ -47,12 +43,6 @@ public class NetworkingInteractorMock: NetworkInteracting {
 
     private var responsePublisher: AnyPublisher<(topic: String, request: RPCRequest, response: RPCResponse, publishedAt: Date, derivedTopic: String?), Never> {
         responsePublisherSubject.eraseToAnyPublisher()
-    }
-
-    private let errorPublisherSubject = PassthroughSubject<Error, Never>()
-
-    public var errorPublisher: AnyPublisher<Error, Never> {
-        return errorPublisherSubject.eraseToAnyPublisher()
     }
 
     // TODO: Avoid copy paste from NetworkInteractor
@@ -95,83 +85,10 @@ public class NetworkingInteractorMock: NetworkInteracting {
             .eraseToAnyPublisher()
     }
 
-    // TODO: Avoid copy paste from NetworkInteractor
-    public func subscribeOnRequest<RequestParams: Codable>(
-        protocolMethod: ProtocolMethod,
-        requestOfType: RequestParams.Type,
-        errorHandler: ErrorHandler?,
-        subscription: @escaping (RequestSubscriptionPayload<RequestParams>) async throws -> Void
-    ) {
-        requestSubscription(on: protocolMethod)
-            .sink { (payload: RequestSubscriptionPayload<RequestParams>) in
-                Task(priority: .high) {
-                    do {
-                        try await subscription(payload)
-                    } catch {
-                        errorHandler?.handle(error: error)
-                    }
-                }
-            }.store(in: &publishers)
-    }
-
-    // TODO: Avoid copy paste from NetworkInteractor
-    public func subscribeOnResponse<Request: Codable, Response: Codable>(
-        protocolMethod: ProtocolMethod,
-        requestOfType: Request.Type,
-        responseOfType: Response.Type,
-        errorHandler: ErrorHandler?,
-        subscription: @escaping (ResponseSubscriptionPayload<Request, Response>) async throws -> Void
-    ) {
-        responseSubscription(on: protocolMethod)
-            .sink { (payload: ResponseSubscriptionPayload<Request, Response>) in
-                Task(priority: .high) {
-                    do {
-                        try await subscription(payload)
-                    } catch {
-                        errorHandler?.handle(error: error)
-                    }
-                }
-            }.store(in: &publishers)
-    }
-
-    public func awaitResponse<Request: Codable, Response: Codable>(
-        request: RPCRequest,
-        topic: String,
-        method: ProtocolMethod,
-        requestOfType: Request.Type,
-        responseOfType: Response.Type,
-        envelopeType: Envelope.EnvelopeType
-    ) async throws -> Response {
-
-        try await self.request(request, topic: topic, protocolMethod: method, envelopeType: envelopeType)
-
-        return try await withCheckedThrowingContinuation { [unowned self] continuation in
-            var response, error: AnyCancellable?
-
-            response = responseSubscription(on: method)
-                .sink { (payload: ResponseSubscriptionPayload<Request, Response>) in
-                    response?.cancel()
-                    error?.cancel()
-                    continuation.resume(with: .success(payload.response))
-                }
-
-            error = responseErrorSubscription(on: method)
-                .sink { (payload: ResponseSubscriptionErrorPayload<Request>) in
-                    response?.cancel()
-                    error?.cancel()
-                    continuation.resume(throwing: payload.error)
-                }
-        }
-    }
-
     public func subscribe(topic: String) async throws {
         defer { onSubscribeCalled?() }
         subscriptions.append(topic)
         didCallSubscribe = true
-    }
-    
-    public func handleHistoryRequest(topic: String, request: JSONRPC.RPCRequest) {
-        didCallHandleHistoryRequest = true
     }
 
     func didSubscribe(to topic: String) -> Bool {

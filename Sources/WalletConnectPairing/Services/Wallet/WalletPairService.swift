@@ -9,28 +9,18 @@ actor WalletPairService {
     let networkingInteractor: NetworkInteracting
     let kms: KeyManagementServiceProtocol
     private let pairingStorage: WCPairingStorage
-    private let history: RPCHistory
-    private let logger: ConsoleLogging
 
-    init(
-        networkingInteractor: NetworkInteracting,
-        kms: KeyManagementServiceProtocol,
-        pairingStorage: WCPairingStorage,
-        history: RPCHistory,
-        logger: ConsoleLogging
-    ) {
+    init(networkingInteractor: NetworkInteracting,
+         kms: KeyManagementServiceProtocol,
+         pairingStorage: WCPairingStorage) {
         self.networkingInteractor = networkingInteractor
         self.kms = kms
         self.pairingStorage = pairingStorage
-        self.history = history
-        self.logger = logger
     }
 
     func pair(_ uri: WalletConnectURI) async throws {
-        logger.debug("Pairing with uri: \(uri)")
-        guard try !pairingHasPendingRequest(for: uri.topic) else {
-            logger.debug("Pairing with topic (\(uri.topic)) has pending request")
-            return
+        guard !hasPairing(for: uri.topic) else {
+            throw Errors.pairingAlreadyExist(topic: uri.topic)
         }
         
         let pairing = WCPairing(uri: uri)
@@ -40,7 +30,6 @@ actor WalletPairService {
         
         let networkConnectionStatus = await resolveNetworkConnectionStatus()
         guard networkConnectionStatus == .connected else {
-            logger.debug("Pairing failed - Network is not connected")
             throw Errors.networkNotConnected
         }
         
@@ -50,28 +39,13 @@ actor WalletPairService {
 
 // MARK: - Private functions
 extension WalletPairService {
-    func pairingHasPendingRequest(for topic: String) throws -> Bool {
-        guard let pairing = pairingStorage.getPairing(forTopic: topic), pairing.requestReceived else {
-            return false
+    func hasPairing(for topic: String) -> Bool {
+        if let pairing = pairingStorage.getPairing(forTopic: topic) {
+            return pairing.requestReceived
         }
-        
-        if pairing.active {
-            throw Errors.pairingAlreadyExist(topic: topic)
-        }
-        
-        let pendingRequests = history.getPending()
-            .compactMap { record -> RPCRequest? in
-                (record.topic == pairing.topic) ? record.request : nil
-            }
-
-
-        guard !pendingRequests.isEmpty else { return false }
-        pendingRequests.forEach { request in
-            networkingInteractor.handleHistoryRequest(topic: topic, request: request)
-        }
-        return true
+        return false
     }
-
+    
     private func resolveNetworkConnectionStatus() async -> NetworkConnectionStatus {
         return await withCheckedContinuation { continuation in
             let cancellable = networkingInteractor.networkConnectionStatusPublisher.sink { value in
@@ -91,7 +65,7 @@ extension WalletPairService {
 extension WalletPairService.Errors: LocalizedError {
     var errorDescription: String? {
         switch self {
-        case .pairingAlreadyExist(let topic):   return "Pairing with topic (\(topic)) is already active"
+        case .pairingAlreadyExist(let topic):   return "Pairing with topic (\(topic)) already exists. Use 'Web3Wallet.instance.getPendingProposals()' or 'Web3Wallet.instance.getPendingRequests()' in order to receive proposals or requests."
         case .networkNotConnected:              return "Pairing failed. You seem to be offline"
         }
     }

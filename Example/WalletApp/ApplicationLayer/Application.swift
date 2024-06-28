@@ -1,9 +1,8 @@
 import Foundation
-import WalletConnectUtils
-import WalletConnectSigner
+import WalletConnectChat
 
 final class Application {
-    var uri: WalletConnectURI?
+    var uri: String?
     var requestSent = false
 
     lazy var pushRegisterer = PushRegisterer()
@@ -12,3 +11,4 @@ final class Application {
     lazy var messageSigner = MessageSignerFactory(signerFactory: DefaultSignerFactory()).create()
     lazy var configurationService = ConfigurationService()
 }
+

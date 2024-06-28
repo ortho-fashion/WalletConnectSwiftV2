@@ -2,30 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>MIXPANEL_TOKEN</key>
-	<string>$(MIXPANEL_TOKEN)</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>wcdapp</string>
-			</array>
-		</dict>
-	</array>
+	<key>CFBundleVersion</key>
+	<string>7</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>LSApplicationQueriesSchemes</key>
-	<array>
-		<string>metamask</string>
-		<string>trust</string>
-		<string>safe</string>
-		<string>zerion</string>
-		<string>rainbow</string>
-		<string>spot</string>
-	</array>
 	<key>PROJECT_ID</key>
 	<string>$(PROJECT_ID)</string>
 	<key>UIApplicationSceneManifest</key>

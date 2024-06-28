@@ -24,9 +24,10 @@ public class Web3Wallet {
             fatalError("Error - you must call Web3Wallet.configure(_:) before accessing the shared instance.")
         }
         return Web3WalletClientFactory.create(
+            authClient: Auth.instance,
             signClient: Sign.instance,
             pairingClient: Pair.instance as! PairingClient,
-            pushClient: Push.instance
+            echoClient: Echo.instance
         )
     }()
     
@@ -41,12 +42,12 @@ public class Web3Wallet {
     static public func configure(
         metadata: AppMetadata,
         crypto: CryptoProvider,
-        pushHost: String = "echo.walletconnect.com",
+        echoHost: String = "echo.walletconnect.com",
         environment: APNSEnvironment = .production
     ) {
         Pair.configure(metadata: metadata)
-        Push.configure(pushHost: pushHost, environment: environment)
-        Sign.configure(crypto: crypto)
+        Auth.configure(crypto: crypto)
+        Echo.configure(echoHost: echoHost, environment: environment)
         Web3Wallet.config = Web3Wallet.Config(crypto: crypto)
     }
 }

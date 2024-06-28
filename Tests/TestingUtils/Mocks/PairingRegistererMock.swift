@@ -7,7 +7,6 @@ public class PairingRegistererMock<RequestParams>: PairingRegisterer where Reque
     public let subject = PassthroughSubject<RequestSubscriptionPayload<RequestParams>, Never>()
 
     public var isActivateCalled: Bool = false
-    public var isReceivedCalled: Bool = false
 
     public func register<RequestParams>(method: ProtocolMethod) -> AnyPublisher<RequestSubscriptionPayload<RequestParams>, Never> where RequestParams: Decodable, RequestParams: Encodable {
         subject.eraseToAnyPublisher() as! AnyPublisher<RequestSubscriptionPayload<RequestParams>, Never>
@@ -22,6 +21,6 @@ public class PairingRegistererMock<RequestParams>: PairingRegisterer where Reque
     }
     
     public func setReceived(pairingTopic: String) {
-        isReceivedCalled = true
+        
     }
 }

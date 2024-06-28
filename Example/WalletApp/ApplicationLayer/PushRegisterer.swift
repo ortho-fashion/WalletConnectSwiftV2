@@ -1,5 +1,5 @@
-import WalletConnectNotify
-import Combine
+
+import WalletConnectPush
 import UIKit
 
 class PushRegisterer {

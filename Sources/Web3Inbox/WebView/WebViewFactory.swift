@@ -22,7 +22,7 @@ final class WebViewFactory {
         )
         configuration.userContentController.add(
             webviewSubscriber,
-            name: WebViewRequestSubscriber.notify
+            name: WebViewRequestSubscriber.push
         )
         let webview = WKWebView(frame: .zero, configuration: configuration)
 

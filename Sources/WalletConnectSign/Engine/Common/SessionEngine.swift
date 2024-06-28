@@ -3,40 +3,34 @@ import Combine
 
 final class SessionEngine {
     enum Errors: Error {
+        case sessionNotFound(topic: String)
         case sessionRequestExpired
     }
 
     var onSessionsUpdate: (([Session]) -> Void)?
+    var onSessionRequest: ((Request, VerifyContext?) -> Void)?
     var onSessionResponse: ((Response) -> Void)?
+    var onSessionRejected: ((String, SessionType.Reason) -> Void)?
     var onSessionDelete: ((String, SessionType.Reason) -> Void)?
     var onEventReceived: ((String, Session.Event, Blockchain?) -> Void)?
 
-    var sessionRequestPublisher: AnyPublisher<(request: Request, context: VerifyContext?), Never> {
-        return sessionRequestsProvider.sessionRequestPublisher
-    }
-
-
     private let sessionStore: WCSessionStorage
     private let networkingInteractor: NetworkInteracting
-    private let historyService: HistoryServiceProtocol
+    private let historyService: HistoryService
     private let verifyContextStore: CodableStore<VerifyContext>
     private let verifyClient: VerifyClientProtocol
     private let kms: KeyManagementServiceProtocol
     private var publishers = [AnyCancellable]()
     private let logger: ConsoleLogging
-    private let sessionRequestsProvider: SessionRequestsProvider
-    private let invalidRequestsSanitiser: InvalidRequestsSanitiser
 
     init(
         networkingInteractor: NetworkInteracting,
-        historyService: HistoryServiceProtocol,
+        historyService: HistoryService,
         verifyContextStore: CodableStore<VerifyContext>,
         verifyClient: VerifyClientProtocol,
         kms: KeyManagementServiceProtocol,
         sessionStore: WCSessionStorage,
-        logger: ConsoleLogging,
-        sessionRequestsProvider: SessionRequestsProvider,
-        invalidRequestsSanitiser: InvalidRequestsSanitiser
+        logger: ConsoleLogging
     ) {
         self.networkingInteractor = networkingInteractor
         self.historyService = historyService
@@ -45,32 +39,62 @@ final class SessionEngine {
         self.kms = kms
         self.sessionStore = sessionStore
         self.logger = logger
-        self.sessionRequestsProvider = sessionRequestsProvider
-        self.invalidRequestsSanitiser = invalidRequestsSanitiser
 
         setupConnectionSubscriptions()
         setupRequestSubscriptions()
         setupResponseSubscriptions()
         setupUpdateSubscriptions()
         setupExpirationSubscriptions()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            self?.sessionRequestsProvider.emitRequestIfPending()
-        }
-
-        removeInvalidSessionRequests()
-    }
-
-    private func removeInvalidSessionRequests() {
-        let sessionTopics = Set(sessionStore.getAll().map(\.topic))
-        invalidRequestsSanitiser.removeInvalidSessionRequests(validSessionTopics: sessionTopics)
     }
 
     func hasSession(for topic: String) -> Bool {
         return sessionStore.hasSession(forTopic: topic)
     }
-    
+
     func getSessions() -> [Session] {
-        sessionStore.getAll().map { $0.publicRepresentation() }
+        sessionStore.getAll().map {$0.publicRepresentation()}
+    }
+
+    func request(_ request: Request) async throws {
+        logger.debug("will request on session topic: \(request.topic)")
+        guard let session = sessionStore.getSession(forTopic: request.topic), session.acknowledged else {
+            logger.debug("Could not find session for topic \(request.topic)")
+            return // TODO: Marked to review on developer facing error cases
+        }
+        guard session.hasPermission(forMethod: request.method, onChain: request.chainId) else {
+            throw WalletConnectError.invalidPermissions
+        }
+        let chainRequest = SessionType.RequestParams.Request(method: request.method, params: request.params, expiry: request.expiry)
+        let sessionRequestParams = SessionType.RequestParams(request: chainRequest, chainId: request.chainId)
+        let protocolMethod = SessionRequestProtocolMethod(ttl: request.calculateTtl())
+        let rpcRequest = RPCRequest(method: protocolMethod.method, params: sessionRequestParams, rpcid: request.id)
+        try await networkingInteractor.request(rpcRequest, topic: request.topic, protocolMethod: SessionRequestProtocolMethod())
+    }
+
+    func respondSessionRequest(topic: String, requestId: RPCID, response: RPCResult) async throws {
+        guard sessionStore.hasSession(forTopic: topic) else {
+            throw Errors.sessionNotFound(topic: topic)
+        }
+
+        let protocolMethod = SessionRequestProtocolMethod()
+
+        guard sessionRequestNotExpired(requestId: requestId) else {
+            try await networkingInteractor.respondError(
+                topic: topic,
+                requestId: requestId,
+                protocolMethod: protocolMethod,
+                reason: SignReasonCode.sessionRequestExpired
+            )
+            verifyContextStore.delete(forKey: requestId.string)
+            throw Errors.sessionRequestExpired
+        }
+
+        try await networkingInteractor.respond(
+            topic: topic,
+            response: RPCResponse(id: requestId, outcome: response),
+            protocolMethod: protocolMethod
+        )
+        verifyContextStore.delete(forKey: requestId.string)
     }
 
     func emit(topic: String, event: SessionType.EventParams.Event, chainId: Blockchain) async throws {
@@ -153,7 +177,6 @@ private extension SessionEngine {
 
     func setupExpirationSubscriptions() {
         sessionStore.onSessionExpiration = { [weak self] session in
-            self?.historyService.removePendingRequest(topic: session.topic)
             self?.kms.deletePrivateKey(for: session.selfParticipant.publicKey)
             self?.kms.deleteAgreementSecret(for: session.topic)
         }
@@ -164,6 +187,13 @@ private extension SessionEngine {
             guard let self else { return }
             self.onSessionsUpdate?(self.getSessions())
         }
+    }
+
+    func sessionRequestNotExpired(requestId: RPCID) -> Bool {
+        guard let request = historyService.getSessionRequest(id: requestId)?.request
+        else { return false }
+
+        return !request.isExpired()
     }
 
     func respondError(payload: SubscriptionPayload, reason: SignReasonCode, protocolMethod: ProtocolMethod) {
@@ -191,7 +221,6 @@ private extension SessionEngine {
     }
 
     func onSessionRequest(payload: RequestSubscriptionPayload<SessionType.RequestParams>) {
-        logger.debug("Received session request")
         let protocolMethod = SessionRequestProtocolMethod()
         let topic = payload.topic
         let request = Request(
@@ -200,7 +229,7 @@ private extension SessionEngine {
             method: payload.request.request.method,
             params: payload.request.request.params,
             chainId: payload.request.chainId,
-            expiryTimestamp: payload.request.request.expiryTimestamp
+            expiry: payload.request.request.expiry
         )
         guard let session = sessionStore.getSession(forTopic: topic) else {
             return respondError(payload: payload, reason: .noSessionForTopic, protocolMethod: protocolMethod)
@@ -217,15 +246,15 @@ private extension SessionEngine {
         Task(priority: .high) {
             let assertionId = payload.decryptedPayload.sha256().toHexString()
             do {
-                let response = try await verifyClient.verifyOrigin(assertionId: assertionId)
-                let verifyContext = verifyClient.createVerifyContext(origin: response.origin, domain: session.peerParticipant.metadata.url, isScam: response.isScam)
+                let origin = try await verifyClient.verifyOrigin(assertionId: assertionId)
+                let verifyContext = verifyClient.createVerifyContext(origin: origin, domain: session.peerParticipant.metadata.url)
                 verifyContextStore.set(verifyContext, forKey: request.id.string)
-
-                sessionRequestsProvider.emitRequestIfPending()
+                onSessionRequest?(request, verifyContext)
             } catch {
-                let verifyContext = verifyClient.createVerifyContext(origin: nil, domain: session.peerParticipant.metadata.url, isScam: nil)
+                let verifyContext = verifyClient.createVerifyContext(origin: nil, domain: session.peerParticipant.metadata.url)
                 verifyContextStore.set(verifyContext, forKey: request.id.string)
-                sessionRequestsProvider.emitRequestIfPending()
+                onSessionRequest?(request, verifyContext)
+                return
             }
         }
     }
@@ -250,13 +279,5 @@ private extension SessionEngine {
             try await networkingInteractor.respondSuccess(topic: payload.topic, requestId: payload.id, protocolMethod: protocolMethod)
         }
         onEventReceived?(topic, event.publicRepresentation(), payload.request.chainId)
-    }
-}
-
-extension SessionEngine.Errors: LocalizedError {
-    var errorDescription: String? {
-        switch self {
-        case .sessionRequestExpired:    return "Session request expired"
-        }
     }
 }

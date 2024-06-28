@@ -10,11 +10,7 @@ struct AcceptPayload: JWTClaimsCodable {
 
         let aud: String // proposer/inviter blockchain account (did:pkh)
         let sub: String // public key sent by the responder/invitee
-        let act: String? // description of action intent
-
-        static var action: String? {
-            return "invite_approval"
-        }
+        let act: String // description of action intent
     }
 
     struct Wrapper: JWTWrapper {
@@ -53,7 +49,7 @@ struct AcceptPayload: JWTClaimsCodable {
             ksu: keyserver.absoluteString,
             aud: inviterAccount.did,
             sub: inviteePublicKey.did(variant: .X25519),
-            act: Claims.action
+            act: "invite_approval"
         )
     }
 }

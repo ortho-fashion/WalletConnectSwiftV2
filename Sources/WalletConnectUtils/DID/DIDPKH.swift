@@ -10,7 +10,7 @@ public struct DIDPKH {
     }
 
     public let account: Account
-    public let did: String
+    public let string: String
 
     public init(did: String) throws {
         guard did.starts(with: DIDPKH.didPrefix)
@@ -22,12 +22,12 @@ public struct DIDPKH {
         guard let account = Account(string)
         else { throw Errors.invalidAccount }
 
-        self.did = did
+        self.string = string
         self.account = account
     }
 
     public init(account: Account) {
-        self.did = "\(DIDPKH.didPrefix):\(account.absoluteString)"
+        self.string = "\(DIDPKH.didPrefix):\(account.absoluteString)"
         self.account = account
     }
 }
@@ -39,6 +39,6 @@ extension Account {
     }
 
     public var did: String {
-        return DIDPKH(account: self).did
+        return DIDPKH(account: self).string
     }
 }

@@ -4,10 +4,10 @@ import WebKit
 final class WebViewRequestSubscriber: NSObject, WKScriptMessageHandler {
 
     static let chat = "web3inboxChat"
-    static let notify = "web3inboxNotify"
+    static let push = "web3inboxPush"
 
     var onChatRequest: ((RPCRequest) async throws -> Void)?
-    var onNotifyRequest: ((RPCRequest) async throws -> Void)?
+    var onPushRequest: ((RPCRequest) async throws -> Void)?
 
     private let url: URL
     private let logger: ConsoleLogging
@@ -35,8 +35,8 @@ final class WebViewRequestSubscriber: NSObject, WKScriptMessageHandler {
                 switch name {
                 case Self.chat:
                     try await onChatRequest?(request)
-                case Self.notify:
-                    try await onNotifyRequest?(request)
+                case Self.push:
+                    try await onPushRequest?(request)
                 default:
                     break
                 }
@@ -44,10 +44,6 @@ final class WebViewRequestSubscriber: NSObject, WKScriptMessageHandler {
                 logger.error("WebView Request error: \(error.localizedDescription). Request: \(request)")
             }
         }
-    }
-
-    func reload(_ webView: WKWebView) {
-        webView.load(URLRequest(url: url))
     }
 }
 
@@ -59,7 +55,7 @@ extension WebViewRequestSubscriber: WKUIDelegate {
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(.grant)
     }
-
+    
     #endif
 }
 
@@ -67,10 +63,17 @@ extension WebViewRequestSubscriber: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
 
-        if navigationAction.request.url == url {
-            decisionHandler(.allow)
-        } else {
+        guard
+            let from = webView.url,
+            let to = navigationAction.request.url
+        else { return decisionHandler(.cancel) }
+
+        if from.absoluteString.contains("/login") || to.absoluteString.contains("/login") {
             decisionHandler(.cancel)
+            webView.load(URLRequest(url: url))
+        } else {
+            decisionHandler(.allow)
         }
     }
 }
+

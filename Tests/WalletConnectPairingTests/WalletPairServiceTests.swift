@@ -11,14 +11,12 @@ final class WalletPairServiceTestsTests: XCTestCase {
     var networkingInteractor: NetworkingInteractorMock!
     var storageMock: WCPairingStorageMock!
     var cryptoMock: KeyManagementServiceMock!
-    var rpcHistory: RPCHistory!
 
     override func setUp() {
         networkingInteractor = NetworkingInteractorMock()
         storageMock = WCPairingStorageMock()
         cryptoMock = KeyManagementServiceMock()
-        rpcHistory = RPCHistoryFactory.createForNetwork(keyValueStorage: RuntimeKeyValueStorage())
-        service = WalletPairService(networkingInteractor: networkingInteractor, kms: cryptoMock, pairingStorage: storageMock, history: rpcHistory, logger: ConsoleLoggerMock())
+        service = WalletPairService(networkingInteractor: networkingInteractor, kms: cryptoMock, pairingStorage: storageMock)
     }
     
     func testPairWhenNetworkNotConnectedThrows() async {
@@ -27,18 +25,13 @@ final class WalletPairServiceTestsTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(try await service.pair(uri))
     }
 
-    func testPairOnSameUriPresentsRequest() async {
-        let rpcRequest = RPCRequest(method: "session_propose", id: 1234)
-        
+    func testPairOnSameURIWhenRequestReceivedThrows() async {
         let uri = WalletConnectURI.stub()
         try! await service.pair(uri)
         var pairing = storageMock.getPairing(forTopic: uri.topic)
         pairing?.receivedRequest()
         storageMock.setPairing(pairing!)
-        try! rpcHistory.set(rpcRequest, forTopic: uri.topic, emmitedBy: .local, transportType: .relay)
-        
-        try! await service.pair(uri)
-        XCTAssertTrue(networkingInteractor.didCallHandleHistoryRequest)
+        await XCTAssertThrowsErrorAsync(try await service.pair(uri))
     }
 
     func testPair() async {

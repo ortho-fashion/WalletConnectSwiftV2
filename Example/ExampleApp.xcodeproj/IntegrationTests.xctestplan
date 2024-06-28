@@ -10,23 +10,10 @@
   ],
   "defaultOptions" : {
     "codeCoverage" : false,
-    "commandLineArgumentEntries" : [
-      {
-        "argument" : "isTesting"
-      }
-    ],
     "environmentVariableEntries" : [
       {
         "key" : "RELAY_HOST",
         "value" : "$(RELAY_HOST)"
-      },
-      {
-        "key" : "EXPLORER_HOST",
-        "value" : "$(EXPLORER_HOST)"
-      },
-      {
-        "key" : "GM_DAPP_HOST",
-        "value" : "$(GM_DAPP_HOST)"
       },
       {
         "key" : "JS_CLIENT_API_HOST",
@@ -59,14 +46,9 @@
     {
       "parallelizable" : true,
       "skippedTests" : [
-        "AuthTests",
         "AuthTests\/testEIP1271RespondSuccess()",
         "ChatTests",
-        "ENSResolverTests",
-        "HistoryTests",
-        "NotifyTests",
-        "SyncDerivationServiceTests",
-        "SyncTests"
+        "ENSResolverTests"
       ],
       "target" : {
         "containerPath" : "container:ExampleApp.xcodeproj",

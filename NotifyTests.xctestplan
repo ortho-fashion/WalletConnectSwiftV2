@@ -16,14 +16,6 @@
         "value" : "$(RELAY_HOST)"
       },
       {
-        "key" : "EXPLORER_HOST",
-        "value" : "$(EXPLORER_HOST)"
-      },
-      {
-        "key" : "GM_DAPP_HOST",
-        "value" : "$(GM_DAPP_HOST)"
-      },
-      {
         "key" : "GM_DAPP_PROJECT_SECRET",
         "value" : "$(GM_DAPP_PROJECT_SECRET)"
       },
@@ -49,11 +41,6 @@
   "testTargets" : [
     {
       "selectedTests" : [
-        "NotifyTests\/testNotifyServerSubscribeAndNotifies()",
-        "NotifyTests\/testNotifySubscriptionChanged()",
-        "NotifyTests\/testNotifyWatchSubscriptions()",
-        "NotifyTests\/testWalletCreatesAndUpdatesSubscription()",
-        "NotifyTests\/testWalletCreatesSubscription()",
         "PushTests\/testNotifyServerSubscribeAndNotifies()",
         "PushTests\/testWalletCreatesAndUpdatesSubscription()"
       ],

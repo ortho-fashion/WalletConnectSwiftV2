@@ -1,51 +1,22 @@
 import Foundation
-import WalletConnectNotify
-
-typealias SubscriptionScope = [String: ScopeValue]
+import WalletConnectPush
 
 struct SubscriptionsViewModel: Identifiable {
-    let subscription: NotifySubscription
-    let messages: [NotifyMessageRecord]?
-
-    init(subscription: NotifySubscription, messages: [NotifyMessageRecord]? = nil) {
-        self.subscription = subscription
-        self.messages = messages
-    }
+    let subscription: WalletConnectPush.PushSubscription
 
     var id: String {
         return subscription.topic
     }
 
-    var imageUrl: URL? {
-        return try? subscription.metadata.icons.first?.asURL()
+    var imageUrl: String {
+        return subscription.metadata.url
+    }
+
+    var title: String {
+        return subscription.metadata.name
     }
 
     var subtitle: String {
         return subscription.metadata.description
-    }
-
-    var name: String {
-        return subscription.metadata.name
-    }
-
-    var description: String {
-        return subscription.metadata.description
-    }
-
-    var domain: String {
-        return subscription.metadata.url
-    }
-
-    var scope: SubscriptionScope {
-        return subscription.scope
-    }
-
-    var messagesCount: Int {
-        return messages?.count ?? 0
-    }
-
-    var hasMessage: Bool {
-        /* return messagesCount != 0 Badge disabled */
-        return false
     }
 }

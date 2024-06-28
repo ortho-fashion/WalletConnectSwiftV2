@@ -7,36 +7,32 @@ final class SessionEngineTests: XCTestCase {
 
     var networkingInteractor: NetworkingInteractorMock!
     var sessionStorage: WCSessionStorageMock!
+    var proposalPayloadsStore: CodableStore<RequestSubscriptionPayload<SessionType.ProposeParams>>!
     var verifyContextStore: CodableStore<VerifyContext>!
-    var rpcHistory: RPCHistory!
     var engine: SessionEngine!
 
     override func setUp() {
         networkingInteractor = NetworkingInteractorMock()
         sessionStorage = WCSessionStorageMock()
-        let defaults = RuntimeKeyValueStorage()
-        rpcHistory = RPCHistory(
-            keyValueStore: .init(
-                defaults: defaults,
-                identifier: ""
-            )
-        )
+        proposalPayloadsStore = CodableStore<RequestSubscriptionPayload<SessionType.ProposeParams>>(defaults: RuntimeKeyValueStorage(), identifier: "")
         verifyContextStore = CodableStore<VerifyContext>(defaults: RuntimeKeyValueStorage(), identifier: "")
-        let historyService = HistoryService(
-            history: rpcHistory,
-            verifyContextStore: verifyContextStore
-        )
         engine = SessionEngine(
             networkingInteractor: networkingInteractor,
-            historyService: historyService,
+            historyService: HistoryService(
+                history: RPCHistory(
+                    keyValueStore: .init(
+                        defaults: RuntimeKeyValueStorage(),
+                        identifier: ""
+                    )
+                ),
+                proposalPayloadsStore: proposalPayloadsStore,
+                verifyContextStore: verifyContextStore
+            ),
             verifyContextStore: verifyContextStore,
             verifyClient: VerifyClientMock(),
             kms: KeyManagementServiceMock(),
             sessionStore: sessionStorage,
-            logger: ConsoleLoggerMock(),
-            sessionRequestsProvider: SessionRequestsProvider(
-                historyService: historyService),
-            invalidRequestsSanitiser: InvalidRequestsSanitiser(historyService: historyService, history: rpcHistory)
+            logger: ConsoleLoggerMock()
         )
     }
 
@@ -61,48 +57,6 @@ final class SessionEngineTests: XCTestCase {
 
         networkingInteractor.requestPublisherSubject.send(("topic", request, Data(), Date(), ""))
 
-        wait(for: [expectation], timeout: 0.5)
-    }
-    
-    func testRemovePendingRequestsOnSessionExpiration() {
-        let expectation = expectation(
-            description: "Remove pending requests on session expiration"
-        )
-        
-        let historyService = MockHistoryService()
-        
-        engine = SessionEngine(
-            networkingInteractor: networkingInteractor,
-            historyService: historyService,
-            verifyContextStore: verifyContextStore,
-            verifyClient: VerifyClientMock(),
-            kms: KeyManagementServiceMock(),
-            sessionStore: sessionStorage,
-            logger: ConsoleLoggerMock(),
-            sessionRequestsProvider: SessionRequestsProvider(
-                historyService: historyService),
-            invalidRequestsSanitiser: InvalidRequestsSanitiser(
-                historyService: historyService,
-                history: rpcHistory
-            )
-        )
-        
-        let expectedTopic = "topic"
-
-        let session = WCSession.stub(
-            topic: expectedTopic,
-            namespaces: SessionNamespace.stubDictionary()
-        )
-        
-        sessionStorage.setSession(session)
-        
-        historyService.removePendingRequestCalled = { topic in
-            XCTAssertEqual(topic, expectedTopic)
-            expectation.fulfill()
-        }
-        
-        sessionStorage.onSessionExpiration!(session)
-        
         wait(for: [expectation], timeout: 0.5)
     }
 }

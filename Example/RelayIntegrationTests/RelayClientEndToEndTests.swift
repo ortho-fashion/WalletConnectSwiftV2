@@ -31,47 +31,34 @@ final class RelayClientEndToEndTests: XCTestCase {
     private var publishers = Set<AnyCancellable>()
 
     func makeRelayClient(prefix: String) -> RelayClient {
-        let keyValueStorage = RuntimeKeyValueStorage()
-        let logger = ConsoleLogger(prefix: prefix, loggingLevel: .debug)
-        let clientIdStorage = ClientIdStorage(defaults: keyValueStorage, keychain: KeychainStorageMock(), logger: logger)
+        let clientIdStorage = ClientIdStorage(keychain: KeychainStorageMock())
         let socketAuthenticator = ClientIdAuthenticator(
-            clientIdStorage: clientIdStorage
+            clientIdStorage: clientIdStorage,
+            url: InputConfig.relayUrl
         )
         let urlFactory = RelayUrlFactory(
             relayHost: InputConfig.relayHost,
             projectId: InputConfig.projectId,
             socketAuthenticator: socketAuthenticator
         )
-        let socket = WebSocket(url: urlFactory.create())
+        let socket = WebSocket(url: urlFactory.create(fallback: false))
         let webSocketFactory = WebSocketFactoryMock(webSocket: socket)
-        let networkMonitor = NetworkMonitor()
-
-        let relayUrlFactory = RelayUrlFactory(
-            relayHost: "relay.walletconnect.com",
-            projectId: "1012db890cf3cfb0c1cdc929add657ba",
-            socketAuthenticator: socketAuthenticator
-        )
-
-        let socketUrlFallbackHandler = SocketUrlFallbackHandler(relayUrlFactory: relayUrlFactory, logger: logger, socket: socket, networkMonitor: networkMonitor)
-
-        let socketConnectionHandler = AutomaticSocketConnectionHandler(socket: socket, logger: logger, socketUrlFallbackHandler: socketUrlFallbackHandler)
+        let logger = ConsoleLogger(suffix: prefix, loggingLevel: .debug)
         let dispatcher = Dispatcher(
             socketFactory: webSocketFactory,
             relayUrlFactory: urlFactory,
-            networkMonitor: networkMonitor,
-            socket: socket,
-            logger: logger,
-            socketConnectionHandler: socketConnectionHandler
+            socketConnectionType: .manual,
+            logger: logger
         )
         let keychain = KeychainStorageMock()
+        let keyValueStorage = RuntimeKeyValueStorage()
         let relayClient = RelayClientFactory.create(
             relayHost: InputConfig.relayHost,
             projectId: InputConfig.projectId,
             keyValueStorage: keyValueStorage,
             keychainStorage: keychain,
             socketFactory: DefaultSocketFactory(),
-            socketConnectionType: .manual, 
-            networkMonitor: networkMonitor,
+            socketConnectionType: .manual,
             logger: logger
         )
         let clientId = try! relayClient.getClientId()

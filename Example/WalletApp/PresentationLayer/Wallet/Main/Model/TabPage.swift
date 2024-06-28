@@ -2,15 +2,15 @@ import UIKit
 
 enum TabPage: CaseIterable {
     case wallet
-    case notifications
+    case web3Inbox
     case settings
 
     var title: String {
         switch self {
         case .wallet:
-            return "Connections"
-        case .notifications:
-            return "Inbox"
+            return "Apps"
+        case .web3Inbox:
+            return "Web3Inbox"
         case .settings:
             return "Settings"
         }
@@ -19,11 +19,11 @@ enum TabPage: CaseIterable {
     var icon: UIImage {
         switch self {
         case .wallet:
-            return UIImage(named: "connections_tab")!
-        case .notifications:
-            return UIImage(named: "inbox_tab")!
+            return UIImage(systemName: "house.fill")!
+        case .web3Inbox:
+            return UIImage(systemName: "bell.fill")!
         case .settings:
-            return UIImage(named: "settings_tab")!
+            return UIImage(systemName: "gearshape.fill")!
         }
     }
 
@@ -32,6 +32,6 @@ enum TabPage: CaseIterable {
     }
 
     static var enabledTabs: [TabPage] {
-        return [.wallet, .notifications, .settings]
+        return [.wallet, .web3Inbox, .settings]
     }
 }

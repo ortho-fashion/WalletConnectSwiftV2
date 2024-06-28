@@ -33,7 +33,7 @@ final class AppProposeService {
         if let sessionProperties {
             try SessionProperties.validate(sessionProperties)
         }
-        let protocolMethod = SessionProposeProtocolMethod.responseApprove()
+        let protocolMethod = SessionProposeProtocolMethod()
         let publicKey = try! kms.createX25519KeyPair()
         let proposer = Participant(
             publicKey: publicKey.hexRepresentation,
@@ -43,7 +43,7 @@ final class AppProposeService {
             relays: [relay],
             proposer: proposer,
             requiredNamespaces: namespaces,
-            optionalNamespaces: optionalNamespaces ?? [:],
+            optionalNamespaces: optionalNamespaces,
             sessionProperties: sessionProperties
         )
         

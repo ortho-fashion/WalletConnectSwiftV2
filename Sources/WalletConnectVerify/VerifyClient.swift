@@ -2,9 +2,8 @@ import DeviceCheck
 import Foundation
 
 public protocol VerifyClientProtocol {
-    func verifyOrigin(assertionId: String) async throws -> VerifyResponse
-    func createVerifyContext(origin: String?, domain: String, isScam: Bool?) -> VerifyContext
-    func createVerifyContextForLinkMode(redirectUniversalLink: String, domain: String) -> VerifyContext
+    func verifyOrigin(assertionId: String) async throws -> String
+    func createVerifyContext(origin: String?, domain: String) -> VerifyContext
 }
 
 public actor VerifyClient: VerifyClientProtocol {
@@ -15,34 +14,43 @@ public actor VerifyClient: VerifyClientProtocol {
     let originVerifier: OriginVerifier
     let assertionRegistrer: AssertionRegistrer
     let appAttestationRegistrer: AppAttestationRegistrer
-    let verifyContextFactory: VerifyContextFactory
+    
+    private let verifyHost: String
 
     init(
+        verifyHost: String,
         originVerifier: OriginVerifier,
         assertionRegistrer: AssertionRegistrer,
-        appAttestationRegistrer: AppAttestationRegistrer,
-        verifyContextFactory: VerifyContextFactory = VerifyContextFactory()
+        appAttestationRegistrer: AppAttestationRegistrer
     ) {
+        self.verifyHost = verifyHost
         self.originVerifier = originVerifier
         self.assertionRegistrer = assertionRegistrer
         self.appAttestationRegistrer = appAttestationRegistrer
-        self.verifyContextFactory = verifyContextFactory
     }
 
     public func registerAttestationIfNeeded() async throws {
         try await appAttestationRegistrer.registerAttestationIfNeeded()
     }
 
-    public func verifyOrigin(assertionId: String) async throws -> VerifyResponse {
+    public func verifyOrigin(assertionId: String) async throws -> String {
         return try await originVerifier.verifyOrigin(assertionId: assertionId)
     }
     
-    nonisolated public func createVerifyContext(origin: String?, domain: String, isScam: Bool?) -> VerifyContext {
-        verifyContextFactory.createVerifyContext(origin: origin, domain: domain, isScam: isScam)
-    }
-
-    nonisolated public func createVerifyContextForLinkMode(redirectUniversalLink: String, domain: String) -> VerifyContext {
-        verifyContextFactory.createVerifyContextForLinkMode(redirectUniversalLink: redirectUniversalLink, domain: domain)
+    nonisolated public func createVerifyContext(origin: String?, domain: String) -> VerifyContext {
+        if let origin, let originUrl = URL(string: origin), let domainUrl = URL(string: domain) {
+            return VerifyContext(
+                origin: origin,
+                validation: (originUrl.host == domainUrl.host) ? .valid : .invalid,
+                verifyUrl: verifyHost
+            )
+        } else {
+            return VerifyContext(
+                origin: origin,
+                validation: .unknown,
+                verifyUrl: verifyHost
+            )
+        }
     }
 
     public func registerAssertion() async throws {
@@ -53,19 +61,14 @@ public actor VerifyClient: VerifyClientProtocol {
 #if DEBUG
 
 public struct VerifyClientMock: VerifyClientProtocol {
-    
     public init() {}
     
-    public func verifyOrigin(assertionId: String) async throws -> VerifyResponse {
-        return VerifyResponse(origin: "domain.com", isScam: nil)
+    public func verifyOrigin(assertionId: String) async throws -> String {
+        return "domain.com"
     }
     
-    public func createVerifyContext(origin: String?, domain: String, isScam: Bool?) -> VerifyContext {
-        return VerifyContext(origin: "domain.com", validation: .valid)
-    }
-    
-    public func createVerifyContextForLinkMode(redirectUniversalLink: String, domain: String) -> VerifyContext {
-        fatalError()
+    public func createVerifyContext(origin: String?, domain: String) -> VerifyContext {
+        return VerifyContext(origin: "domain.com", validation: .valid, verifyUrl: "verify.walletconnect.com")
     }
 }
 

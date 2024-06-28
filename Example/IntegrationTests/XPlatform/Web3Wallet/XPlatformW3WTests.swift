@@ -2,8 +2,9 @@ import Foundation
 import XCTest
 import Combine
 @testable import Web3Wallet
+@testable import Auth
 @testable import WalletConnectSign
-@testable import WalletConnectPush
+@testable import WalletConnectEcho
 
 final class XPlatformW3WTests: XCTestCase {
     var w3wClient: Web3WalletClient!
@@ -19,12 +20,12 @@ final class XPlatformW3WTests: XCTestCase {
         let keychain = KeychainStorageMock()
         let keyValueStorage = RuntimeKeyValueStorage()
 
-        let relayLogger = ConsoleLogger(prefix: "🚄" + " [Relay]", loggingLevel: .debug)
-        let pairingLogger = ConsoleLogger(prefix: "👩‍❤️‍💋‍👩" + " [Pairing]", loggingLevel: .debug)
-        let networkingLogger = ConsoleLogger(prefix: "🕸️" + " [Networking]", loggingLevel: .debug)
-        let authLogger = ConsoleLogger(prefix: "🪪", loggingLevel: .debug)
+        let relayLogger = ConsoleLogger(suffix: "🚄" + " [Relay]", loggingLevel: .debug)
+        let pairingLogger = ConsoleLogger(suffix: "👩‍❤️‍💋‍👩" + " [Pairing]", loggingLevel: .debug)
+        let networkingLogger = ConsoleLogger(suffix: "🕸️" + " [Networking]", loggingLevel: .debug)
+        let authLogger = ConsoleLogger(suffix: "🪪", loggingLevel: .debug)
 
-        let signLogger = ConsoleLogger(prefix: "✍🏿", loggingLevel: .debug)
+        let signLogger = ConsoleLogger(suffix: "✍🏿", loggingLevel: .debug)
 
         let relayClient = RelayClientFactory.create(
             relayHost: InputConfig.relayHost,
@@ -32,7 +33,6 @@ final class XPlatformW3WTests: XCTestCase {
             keyValueStorage: keyValueStorage,
             keychainStorage: keychain,
             socketFactory: DefaultSocketFactory(),
-            networkMonitor: NetworkMonitor(),
             logger: relayLogger
         )
 
@@ -49,21 +49,30 @@ final class XPlatformW3WTests: XCTestCase {
             networkingClient: networkingClient)
 
         let signClient = SignClientFactory.create(
-            metadata: AppMetadata(name: name, description: "", url: "", icons: [""], redirect: try! AppMetadata.Redirect(native: "", universal: nil)),
+            metadata: AppMetadata(name: name, description: "", url: "", icons: [""]),
             logger: signLogger,
             keyValueStorage: keyValueStorage,
             keychainStorage: keychain,
             pairingClient: pairingClient,
-            networkingClient: networkingClient,
-            iatProvider: DefaultIATProvider(),
-            projectId: InputConfig.projectId,
-            crypto: DefaultCryptoProvider()
+            networkingClient: networkingClient
         )
 
+        let authClient = AuthClientFactory.create(
+            metadata: AppMetadata(name: name, description: "", url: "", icons: [""]),
+            projectId: InputConfig.projectId,
+            crypto: DefaultCryptoProvider(),
+            logger: authLogger,
+            keyValueStorage: keyValueStorage,
+            keychainStorage: keychain,
+            networkingClient: networkingClient,
+            pairingRegisterer: pairingClient,
+            iatProvider: DefaultIATProvider())
+
         w3wClient = Web3WalletClientFactory.create(
+            authClient: authClient,
             signClient: signClient,
             pairingClient: pairingClient,
-            pushClient: PushClientMock())
+            echoClient: EchoClientMock())
     }
 
     func testSessionSettle() async throws {

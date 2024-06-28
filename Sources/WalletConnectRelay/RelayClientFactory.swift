@@ -8,19 +8,14 @@ public struct RelayClientFactory {
         relayHost: String,
         projectId: String,
         socketFactory: WebSocketFactory,
-        groupIdentifier: String,
         socketConnectionType: SocketConnectionType
     ) -> RelayClient {
 
+        let keyValueStorage = UserDefaults.standard
 
-        guard let keyValueStorage = UserDefaults(suiteName: groupIdentifier) else {
-            fatalError("Could not instantiate UserDefaults for a group identifier \(groupIdentifier)")
-        }
-        let keychainStorage = KeychainStorage(serviceIdentifier: "com.walletconnect.sdk", accessGroup: groupIdentifier)
+        let keychainStorage = KeychainStorage(serviceIdentifier: "com.walletconnect.sdk")
 
-        let logger = ConsoleLogger(prefix: "🚄" ,loggingLevel: .off)
-
-        let networkMonitor = NetworkMonitor()
+        let logger = ConsoleLogger(suffix: "🚄" ,loggingLevel: .debug)
 
         return RelayClientFactory.create(
             relayHost: relayHost,
@@ -29,7 +24,6 @@ public struct RelayClientFactory {
             keychainStorage: keychainStorage,
             socketFactory: socketFactory,
             socketConnectionType: socketConnectionType,
-            networkMonitor: networkMonitor,
             logger: logger
         )
     }
@@ -42,44 +36,25 @@ public struct RelayClientFactory {
         keychainStorage: KeychainStorageProtocol,
         socketFactory: WebSocketFactory,
         socketConnectionType: SocketConnectionType = .automatic,
-        networkMonitor: NetworkMonitoring,
         logger: ConsoleLogging
     ) -> RelayClient {
 
-        let clientIdStorage = ClientIdStorage(defaults: keyValueStorage, keychain: keychainStorage, logger: logger)
+        let clientIdStorage = ClientIdStorage(keychain: keychainStorage)
 
         let socketAuthenticator = ClientIdAuthenticator(
-            clientIdStorage: clientIdStorage
+            clientIdStorage: clientIdStorage,
+            url: "wss://\(relayHost)"
         )
         let relayUrlFactory = RelayUrlFactory(
             relayHost: relayHost,
             projectId: projectId,
             socketAuthenticator: socketAuthenticator
         )
-        let socket = socketFactory.create(with: relayUrlFactory.create())
-        socket.request.addValue(EnvironmentInfo.userAgent, forHTTPHeaderField: "User-Agent")
-        if let bundleId = Bundle.main.bundleIdentifier {
-            socket.request.addValue(bundleId, forHTTPHeaderField: "Origin")
-        }
-        let socketFallbackHandler = SocketUrlFallbackHandler(
-            relayUrlFactory: relayUrlFactory,
-            logger: logger,
-            socket: socket,
-            networkMonitor: networkMonitor
-        )
-        var socketConnectionHandler: SocketConnectionHandler!
-        switch socketConnectionType {
-        case .automatic:    socketConnectionHandler = AutomaticSocketConnectionHandler(socket: socket, logger: logger, socketUrlFallbackHandler: socketFallbackHandler)
-        case .manual:       socketConnectionHandler = ManualSocketConnectionHandler(socket: socket, logger: logger, socketUrlFallbackHandler: socketFallbackHandler)
-        }
-
         let dispatcher = Dispatcher(
             socketFactory: socketFactory,
             relayUrlFactory: relayUrlFactory,
-            networkMonitor: networkMonitor,
-            socket: socket,
-            logger: logger,
-            socketConnectionHandler: socketConnectionHandler
+            socketConnectionType: socketConnectionType,
+            logger: logger
         )
 
         let rpcHistory = RPCHistoryFactory.createForRelay(keyValueStorage: keyValueStorage)

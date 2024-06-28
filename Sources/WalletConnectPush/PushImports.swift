@@ -1,4 +1,7 @@
 #if !CocoaPods
-@_exported import WalletConnectNetworking
-@_exported import WalletConnectJWT
+@_exported import WalletConnectPairing
+@_exported import WalletConnectEcho
+@_exported import WalletConnectIdentity
+@_exported import WalletConnectSync
+@_exported import WalletConnectHistory
 #endif

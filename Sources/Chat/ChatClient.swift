@@ -89,43 +89,29 @@ public class ChatClient {
     @discardableResult
     public func register(account: Account,
         isPrivate: Bool = false,
-        domain: String,
         onSign: @escaping SigningCallback
     ) async throws -> String {
+        let publicKey = try await identityClient.register(account: account, onSign: onSign)
 
-        let params = try await identityClient.prepareRegistration(
-            account: account,
-            domain: domain,
-            statement: "statement",
-            resources: ["https://keys.walletconnect.com"]
-        )
-
-        switch await onSign(params.message) {
-        case .signed(let signature):
-            let publicKey = try await identityClient.register(params: params, signature: signature)
-
-            if !syncRegisterService.isRegistered(account: account) {
-                try await chatStorage.initializeHistory(account: account)
-                try await syncRegisterService.register(account: account, onSign: onSign)
-            }
-
-            guard !isPrivate else {
-                return publicKey
-            }
-
-            try await goPublic(account: account)
-
-            return publicKey
-
-        case .rejected:
-            fatalError("Not implemented")
+        if !syncRegisterService.isRegistered(account: account) {
+            try await chatStorage.initializeHistory(account: account)
+            try await syncRegisterService.register(account: account, onSign: onSign)
         }
+
+        guard !isPrivate else {
+            return publicKey
+        }
+
+        try await goPublic(account: account)
+
+        return publicKey
     }
 
     /// Unregisters a blockchain account with previously registered identity key
     /// Must not unregister invite key but must stop listening for invites
-    public func unregister(account: Account) async throws {
-        try await identityClient.unregister(account: account)
+    /// - Parameter onSign: Callback for signing CAIP-122 message to verify blockchain account ownership
+    public func unregister(account: Account, onSign: @escaping SigningCallback) async throws {
+        try await identityClient.unregister(account: account, onSign: onSign)
     }
 
     /// Queries the keyserver with a blockchain account

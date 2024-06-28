@@ -7,16 +7,13 @@ final class SignCleanupService {
     private let kms: KeyManagementServiceProtocol
     private let sessionTopicToProposal: CodableStore<Session.Proposal>
     private let networkInteractor: NetworkInteracting
-    private let rpcHistory: RPCHistory
 
-    init(pairingStore: WCPairingStorage, sessionStore: WCSessionStorage, kms: KeyManagementServiceProtocol, sessionTopicToProposal: CodableStore<Session.Proposal>, networkInteractor: NetworkInteracting,
-         rpcHistory: RPCHistory) {
+    init(pairingStore: WCPairingStorage, sessionStore: WCSessionStorage, kms: KeyManagementServiceProtocol, sessionTopicToProposal: CodableStore<Session.Proposal>, networkInteractor: NetworkInteracting) {
         self.pairingStore = pairingStore
         self.sessionStore = sessionStore
         self.sessionTopicToProposal = sessionTopicToProposal
         self.networkInteractor = networkInteractor
         self.kms = kms
-        self.rpcHistory = rpcHistory
     }
 
     func cleanup() async throws {
@@ -35,14 +32,13 @@ private extension SignCleanupService {
         let pairing = pairingStore.getAll().map { $0.topic }
         let session = sessionStore.getAll().map { $0.topic }
 
-        try? await networkInteractor.batchUnsubscribe(topics: pairing + session)
+        try await networkInteractor.batchUnsubscribe(topics: pairing + session)
     }
 
     func cleanupStorages() throws {
         pairingStore.deleteAll()
         sessionStore.deleteAll()
         sessionTopicToProposal.deleteAll()
-        rpcHistory.deleteAll()
-        try? kms.deleteAll()
+        try kms.deleteAll()
     }
 }

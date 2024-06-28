@@ -1,9 +1,9 @@
-@testable import WalletConnectNotify
+@testable import WalletConnectPush
 import Foundation
 
 class Publisher {
-    func notify(topic: String, account: Account, message: NotifyMessage) async throws {
-        let url = URL(string: "https://\(InputConfig.notifyHost)/\(InputConfig.gmDappProjectId)/notify")!
+    func notify(topic: String, account: Account, message: PushMessage) async throws {
+        let url = URL(string: "https://\(InputConfig.castHost)/\(InputConfig.gmDappProjectId)/notify")!
         var request = URLRequest(url: url)
         let notifyRequestPayload = NotifyRequest(notification: message, accounts: [account])
         let encoder = JSONEncoder()
@@ -19,6 +19,6 @@ class Publisher {
 }
 
 struct NotifyRequest: Codable {
-    let notification: NotifyMessage
+    let notification: PushMessage
     let accounts: [Account]
 }

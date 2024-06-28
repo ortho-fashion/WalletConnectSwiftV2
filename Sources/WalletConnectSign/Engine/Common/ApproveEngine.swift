@@ -3,14 +3,12 @@ import Combine
 
 final class ApproveEngine {
     enum Errors: Error {
-        case proposalNotFound
+        case wrongRequestParams
         case relayNotFound
+        case proposalPayloadsNotFound
         case pairingNotFound
         case sessionNotFound
         case agreementMissingOrInvalid
-        case networkNotConnected
-        case proposalExpired
-        case emtySessionNamespacesForbidden
     }
 
     var onSessionProposal: ((Session.Proposal, VerifyContext?) -> Void)?
@@ -28,8 +26,6 @@ final class ApproveEngine {
     private let metadata: AppMetadata
     private let kms: KeyManagementServiceProtocol
     private let logger: ConsoleLogging
-    private let rpcHistory: RPCHistory
-    private let authRequestSubscribersTracking: AuthRequestSubscribersTracking
 
     private var publishers = Set<AnyCancellable>()
 
@@ -44,9 +40,7 @@ final class ApproveEngine {
         logger: ConsoleLogging,
         pairingStore: WCPairingStorage,
         sessionStore: WCSessionStorage,
-        verifyClient: VerifyClientProtocol,
-        rpcHistory: RPCHistory,
-        authRequestSubscribersTracking: AuthRequestSubscribersTracking
+        verifyClient: VerifyClientProtocol
     ) {
         self.networkingInteractor = networkingInteractor
         self.proposalPayloadsStore = proposalPayloadsStore
@@ -59,37 +53,22 @@ final class ApproveEngine {
         self.pairingStore = pairingStore
         self.sessionStore = sessionStore
         self.verifyClient = verifyClient
-        self.rpcHistory = rpcHistory
-        self.authRequestSubscribersTracking = authRequestSubscribersTracking
 
         setupRequestSubscriptions()
         setupResponseSubscriptions()
         setupResponseErrorSubscriptions()
     }
 
-    func approveProposal(proposerPubKey: String, validating sessionNamespaces: [String: SessionNamespace], sessionProperties: [String: String]? = nil) async throws -> Session {
-        logger.debug("Approving session proposal")
-
-        guard !sessionNamespaces.isEmpty else { throw Errors.emtySessionNamespacesForbidden }
-
+    func approveProposal(proposerPubKey: String, validating sessionNamespaces: [String: SessionNamespace], sessionProperties: [String: String]? = nil) async throws {
         guard let payload = try proposalPayloadsStore.get(key: proposerPubKey) else {
-            throw Errors.proposalNotFound
+            throw Errors.wrongRequestParams
         }
 
         let proposal = payload.request
-
-        guard !proposal.isExpired() else {
-            logger.debug("Proposal has expired, topic: \(payload.topic)")
-            proposalPayloadsStore.delete(forKey: proposerPubKey)
-            throw Errors.proposalExpired
-        }
-
-        let networkConnectionStatus = await resolveNetworkConnectionStatus()
-        guard networkConnectionStatus == .connected else {
-            throw Errors.networkNotConnected
-        }
-
         let pairingTopic = payload.topic
+
+        proposalPayloadsStore.delete(forKey: proposerPubKey)
+        verifyContextStore.delete(forKey: proposerPubKey)
 
         try Namespace.validate(sessionNamespaces)
         try Namespace.validateApproved(sessionNamespaces, against: proposal.requiredNamespaces)
@@ -111,13 +90,13 @@ final class ApproveEngine {
         let result = SessionType.ProposeResponse(relay: relay, responderPublicKey: selfPublicKey.hexRepresentation)
         let response = RPCResponse(id: payload.id, result: result)
 
-        async let proposeResponseTask: () = networkingInteractor.respond(
+        async let proposeResponse: () = networkingInteractor.respond(
             topic: payload.topic,
             response: response,
-            protocolMethod: SessionProposeProtocolMethod.responseApprove()
+            protocolMethod: SessionProposeProtocolMethod()
         )
 
-        async let settleRequestTask: WCSession = settle(
+        async let settleRequest: () = settle(
             topic: sessionTopic,
             proposal: proposal,
             namespaces: sessionNamespaces,
@@ -125,47 +104,25 @@ final class ApproveEngine {
             pairingTopic: pairingTopic
         )
 
-        _ = try await proposeResponseTask
-        let session: WCSession = try await settleRequestTask
-
-        sessionStore.setSession(session)
-        onSessionSettle?(session.publicRepresentation())
-        logger.debug("Session proposal response and settle request have been sent")
-
-        proposalPayloadsStore.delete(forKey: proposerPubKey)
-        verifyContextStore.delete(forKey: proposerPubKey)
+        _ = try await [proposeResponse, settleRequest]
 
         pairingRegisterer.activate(
             pairingTopic: payload.topic,
             peerMetadata: payload.request.proposer.metadata
         )
-        return session.publicRepresentation()
     }
 
     func reject(proposerPubKey: String, reason: SignReasonCode) async throws {
         guard let payload = try proposalPayloadsStore.get(key: proposerPubKey) else {
-            throw Errors.proposalNotFound
+            throw Errors.proposalPayloadsNotFound
         }
- 
-        try await networkingInteractor.respondError(
-            topic: payload.topic,
-            requestId: payload.id,
-            protocolMethod: SessionProposeProtocolMethod.responseReject(),
-            reason: reason
-        )
-
-        if let pairingTopic = rpcHistory.get(recordId: payload.id)?.topic,
-           let pairing = pairingStore.getPairing(forTopic: pairingTopic),
-           !pairing.active {
-            pairingStore.delete(topic: pairingTopic)
-        }
-
         proposalPayloadsStore.delete(forKey: proposerPubKey)
         verifyContextStore.delete(forKey: proposerPubKey)
-
+        try await networkingInteractor.respondError(topic: payload.topic, requestId: payload.id, protocolMethod: SessionProposeProtocolMethod(), reason: reason)
+        // TODO: Delete pairing if inactive 
     }
 
-    func settle(topic: String, proposal: SessionProposal, namespaces: [String: SessionNamespace], sessionProperties: [String: String]? = nil, pairingTopic: String) async throws -> WCSession {
+    func settle(topic: String, proposal: SessionProposal, namespaces: [String: SessionNamespace], sessionProperties: [String: String]? = nil, pairingTopic: String) async throws {
         guard let agreementKeys = kms.getAgreementSecret(for: topic) else {
             throw Errors.agreementMissingOrInvalid
         }
@@ -198,12 +155,12 @@ final class ApproveEngine {
             peerParticipant: proposal.proposer,
             settleParams: settleParams,
             requiredNamespaces: proposal.requiredNamespaces,
-            acknowledged: false,
-            transportType: .relay
+            acknowledged: false
         )
 
         logger.debug("Sending session settle request")
 
+        sessionStore.setSession(session)
 
         let protocolMethod = SessionSettleProtocolMethod()
         let request = RPCRequest(method: protocolMethod.method, params: settleParams)
@@ -212,7 +169,7 @@ final class ApproveEngine {
         async let settleRequest: () = networkingInteractor.request(request, topic: topic, protocolMethod: protocolMethod)
 
         _ = try await [settleRequest, subscription]
-        return session
+        onSessionSettle?(session.publicRepresentation())
     }
 }
 
@@ -221,18 +178,8 @@ final class ApproveEngine {
 private extension ApproveEngine {
 
     func setupRequestSubscriptions() {
-        pairingRegisterer.register(method: SessionProposeProtocolMethod.responseAutoReject())
+        pairingRegisterer.register(method: SessionProposeProtocolMethod())
             .sink { [unowned self] (payload: RequestSubscriptionPayload<SessionType.ProposeParams>) in
-                guard let pairing = pairingStore.getPairing(forTopic: payload.topic) else { return }
-                let responseApproveMethod = SessionAuthenticatedProtocolMethod.responseApprove().method
-                if let methods = pairing.methods,
-                   methods.contains(responseApproveMethod),
-                    authRequestSubscribersTracking.hasSubscribers()
-                {
-                    logger.debug("Ignoring Session Proposal")
-                    // respond with an error?
-                    return
-                }
                 handleSessionProposeRequest(payload: payload)
             }.store(in: &publishers)
 
@@ -243,7 +190,7 @@ private extension ApproveEngine {
     }
 
     func setupResponseSubscriptions() {
-        networkingInteractor.responseSubscription(on: SessionProposeProtocolMethod.responseApprove())
+        networkingInteractor.responseSubscription(on: SessionProposeProtocolMethod())
             .sink { [unowned self] (payload: ResponseSubscriptionPayload<SessionType.ProposeParams, SessionType.ProposeResponse>) in
                 handleSessionProposeResponse(payload: payload)
             }.store(in: &publishers)
@@ -255,7 +202,7 @@ private extension ApproveEngine {
     }
 
     func setupResponseErrorSubscriptions() {
-        networkingInteractor.responseErrorSubscription(on: SessionProposeProtocolMethod.responseApprove())
+        networkingInteractor.responseErrorSubscription(on: SessionProposeProtocolMethod())
             .sink { [unowned self] (payload: ResponseSubscriptionErrorPayload<SessionType.ProposeParams>) in
                 handleSessionProposeResponseError(payload: payload)
             }.store(in: &publishers)
@@ -347,30 +294,24 @@ private extension ApproveEngine {
         logger.debug("Received Session Proposal")
         let proposal = payload.request
         do { try Namespace.validate(proposal.requiredNamespaces) } catch {
-            return respondError(payload: payload, reason: .invalidUpdateRequest, protocolMethod: SessionProposeProtocolMethod.responseAutoReject())
+            return respondError(payload: payload, reason: .invalidUpdateRequest, protocolMethod: SessionProposeProtocolMethod())
         }
         proposalPayloadsStore.set(payload, forKey: proposal.proposer.publicKey)
         
         pairingRegisterer.setReceived(pairingTopic: payload.topic)
         
-        if let verifyContext = try? verifyContextStore.get(key: proposal.proposer.publicKey) {
-            onSessionProposal?(proposal.publicRepresentation(pairingTopic: payload.topic), verifyContext)
-            return
-        }
-        
         Task(priority: .high) {
             let assertionId = payload.decryptedPayload.sha256().toHexString()
             do {
-                let response = try await verifyClient.verifyOrigin(assertionId: assertionId)
+                let origin = try await verifyClient.verifyOrigin(assertionId: assertionId)
                 let verifyContext = verifyClient.createVerifyContext(
-                    origin: response.origin,
-                    domain: payload.request.proposer.metadata.url,
-                    isScam: response.isScam
+                    origin: origin,
+                    domain: payload.request.proposer.metadata.url
                 )
                 verifyContextStore.set(verifyContext, forKey: proposal.proposer.publicKey)
                 onSessionProposal?(proposal.publicRepresentation(pairingTopic: payload.topic), verifyContext)
             } catch {
-                let verifyContext = verifyClient.createVerifyContext(origin: nil, domain: payload.request.proposer.metadata.url, isScam: nil)
+                let verifyContext = verifyClient.createVerifyContext(origin: nil, domain: payload.request.proposer.metadata.url)
                 onSessionProposal?(proposal.publicRepresentation(pairingTopic: payload.topic), verifyContext)
                 return
             }
@@ -423,8 +364,7 @@ private extension ApproveEngine {
             peerParticipant: params.controller,
             settleParams: params,
             requiredNamespaces: proposedNamespaces,
-            acknowledged: true,
-            transportType: .relay
+            acknowledged: true
         )
         sessionStore.setSession(session)
 
@@ -432,43 +372,5 @@ private extension ApproveEngine {
             try await networkingInteractor.respondSuccess(topic: payload.topic, requestId: payload.id, protocolMethod: protocolMethod)
         }
         onSessionSettle?(session.publicRepresentation())
-    }
-    
-    func resolveNetworkConnectionStatus() async -> NetworkConnectionStatus {
-        return await withCheckedContinuation { continuation in
-            let cancellable = networkingInteractor.networkConnectionStatusPublisher.sink { value in
-                continuation.resume(returning: value)
-            }
-            
-            Task(priority: .high) {
-                await withTaskCancellationHandler {
-                    cancellable.cancel()
-                } onCancel: { }
-            }
-        }
-    }
-}
-
-// MARK: - LocalizedError
-extension ApproveEngine.Errors: LocalizedError {
-    var errorDescription: String? {
-        switch self {
-        case .proposalNotFound:
-            return "Proposal not found."
-        case .relayNotFound:
-            return "Relay not found."
-        case .pairingNotFound:
-            return "Pairing not found."
-        case .sessionNotFound:
-            return "Session not found."
-        case .agreementMissingOrInvalid:
-            return "Agreement missing or invalid."
-        case .networkNotConnected:
-            return "Network not connected."
-        case .proposalExpired:
-            return "Proposal expired."
-        case .emtySessionNamespacesForbidden:
-            return "Session Namespaces Cannot Be Empty"
-        }
     }
 }
